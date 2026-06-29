@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cartesian Plane Plotting Game (Linear Relationships)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Plotly.js CDN -->
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #eef6fa; max-width: 850px; margin: 24px auto; }
+    h1, h2 { color: #2980b9; text-align: center; }
+    .section { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #b1c7db4d; padding: 24px; }
+    .game-flex { display: flex; flex-wrap: wrap; gap: 24px; }
+    .left-pane { flex: 1 1 350px; }
+    .right-pane { flex: 2 1 460px; min-width: 330px; }
+    .input-row { margin: 18px 0; }
+    button { background: #2980b9; color: #fff; border: none; border-radius: 5px; padding: 8px 18px; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #21618c; }
+    .feedback { margin: 12px 0; font-weight: bold; min-height: 25px; }
+    .correct { color: green; }
+    .incorrect { color: red; }
+    label { font-weight: bold;}
+    #plot-area { width: 100%; height: 400px; }
+    @media (max-width: 720px){
+      .game-flex { flex-direction: column; }
+      .left-pane, .right-pane { min-width: 100%; }
+      #plot-area { height: 320px;}
+    }
+  </style>
+</head>
+<body>
+<h1>Cartesian Plane Plotting Game</h1>
+<div class="section">
+  <div class="game-flex">
+    <div class="left-pane">
+      <h2>Linear Relationships</h2>
+      <div>
+        <label>Select activity:</label><br>
+        <input type="radio" name="activity" id="plot-given" value="plot" checked>
+        <label for="plot-given">Plot the point (given ordered pair)</label><br>
+        <input type="radio" name="activity" id="write-coords" value="write">
+        <label for="write-coords">Write down coordinates (given point)</label>
+      </div>
+      <hr>
+      <div id="game-question" style="font-size:1.15em; margin:16px 0;"></div>
+      <div class="input-row" id="input-area"></div>
+      <div class="feedback" id="feedback"></div>
+      <button id="next-btn">Next</button>
+    </div>
+    <div class="right-pane">
+      <h2>Cartesian Plane</h2>
+      <div id="plot-area" aria-label="Interactive Cartesian plane"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// GAME STATE
+let mode = "plot"; // 'plot' = plot the given ordered pair, 'write' = write coords of shown point
+let question = {};
+let userMarker = null; // For student's plot
+
+const axesConfig = {
+  x: {min: -10, max: 10},
+  y: {min: -10, max: 10}
+};
+
+// Generate a random integer (excluding zero unless allowed)
+function getRandomInt(min,max,excludeZero=true){
+  let r;
+  do { r = Math.floor(Math.random()*(max-min+1))+min;} 
+  while (excludeZero && r===0);
+  return r;
+}
+
+function newQuestion() {
+  // Clear feedback & plot
+  document.getElementById('feedback').textContent = '';
+  userMarker = null;
+  // Decide mode
+  mode = document.querySelector('input[name="activity"]:checked').value;
+  // Generate random coordinate in bounds
+  let x = getRandomInt(axesConfig.x.min+2, axesConfig.x.max-2);
+  let y = getRandomInt(axesConfig.y.min+2, axesConfig.y.max-2);
+  if (mode === 'plot') {
+    // For plotting: give the ordered pair as question, ask student to plot it.
+    question = {x, y};
+    document.getElementById('game-question').innerHTML = `Plot the point <b>(${x}, ${y})</b> on the Cartesian plane by clicking the correct location.`;
+    document.getElementById('input-area').innerHTML = '';
+    drawPlot(); // No marker yet
+    // Add click event to plot
+    Plotly.d3.select('#plot-area').on('click', function () {
+      const coords = Plotly.d3.event;
+      const rect = document.getElementById('plot-area').getBoundingClientRect();
+      const px = coords.clientX - rect.left;
+      const py = coords.clientY - rect.top;
+      // Convert pixel to axis
+      const plotInfo = document.getElementById('plot-area')._fullLayout;
+      if (!plotInfo) return;
+      // Axis conversion
+      let xVal = plotInfo.xaxis.p2c.inverse(px);
+      let yVal = plotInfo.yaxis.p2c.inverse(py);
+      // Snap to nearest integer grid
+      xVal = Math.round(xVal);
+      yVal = Math.round(yVal);
+      userMarker = {x:xVal, y:yVal};
+      drawPlot(userMarker);
+      document.getElementById('input-area').innerHTML = `<p>Your selected point: <b>(${xVal}, ${yVal})</b></p>`;
+    });
+  } else if (mode === 'write') {
+    // For writing: plot a point, ask student to write its coordinates.
+    question = {x, y};
+    drawPlot({x,y}, false); // Show the POINT, not user marker
+    document.getElementById('game-question').innerHTML = `What are the coordinates of the highlighted point <span style="color:#b7950b;">•</span> on the Cartesian plane? Write as an ordered pair:`;
+    document.getElementById('input-area').innerHTML =
+      `<input type="text" id="coords-input" placeholder="e.g. (2, 5)" style="width:120px; font-size:1.1em;" />`;
+  }
+}
+
+function drawPlot(marker, asStudent=true) {
+  const xTicks = [];
+  for(let i=axesConfig.x.min;i<=axesConfig.x.max;i++) xTicks.push(i);
+  const yTicks = [];
+  for(let i=axesConfig.y.min;i<=axesConfig.y.max;i++) yTicks.push(i);
+
+  // Axis grid + question marker + student marker
+  const grid = {
+    x: xTicks,
+    y: yTicks,
+    mode: 'none'
+  };
+
+  let data = [];
+  // Plot question marker:
+  if (mode === 'write' && marker) {
+    data.push({
+      x: [marker.x], y: [marker.y], type:'scatter', mode:'markers',
+      name:'Given Point', marker:{ size:22, color:'#b7950b', symbol:'circle' }
+    });
+  }
+  // Plot student marker:
+  if (mode === 'plot' && marker) {
+    data.push({
+      x: [marker.x], y: [marker.y], type:'scatter', mode:'markers',
+      name:'Your Point', marker:{ size:22, color:'#2980b9', symbol:'x' }
+    });
+  }
+  // Draw axes/grid
+  const layout = {
+    xaxis: {
+      range: [axesConfig.x.min, axesConfig.x.max],
+      dtick: 1, zeroline:true, zerolinewidth:2,
+      gridcolor:'rgba(128,128,128,0.15)', gridwidth:1, showline:true, linewidth:2
+    },
+    yaxis: {
+      range: [axesConfig.y.min, axesConfig.y.max],
+      dtick: 1, zeroline:true, zerolinewidth:2,
+      gridcolor:'rgba(128,128,128,0.15)', gridwidth:1, showline:true, linewidth:2
+    },
+    showlegend:false,
+    margin:{t:40, r:40, b:40, l:40},
+    plot_bgcolor:'#f6fafd',
+    hovermode:false
+  };
+  Plotly.newPlot('plot-area', data, layout, {displayModeBar:false, responsive:true});
+}
+
+function checkAnswer() {
+  document.getElementById('feedback').textContent = '';
+  // Plotting mode: check if userMarker matches question
+  if (mode === 'plot') {
+    if (!userMarker) {
+      document.getElementById('feedback').innerHTML = '<span class="incorrect">Click on the plane to choose your answer.</span>';
+      return;
+    }
+    if (userMarker.x === question.x && userMarker.y === question.y) {
+      document.getElementById('feedback').innerHTML = `<span class="correct">🎉 Correct! (${question.x}, ${question.y}) is plotted.</span>`;
+    } else {
+      document.getElementById('feedback').innerHTML = `<span class="incorrect">❌ Incorrect. You selected (${userMarker.x}, ${userMarker.y}), but the correct point is (${question.x}, ${question.y}). Try again or click 'Next'.</span>`;
+    }
+    // Show correct point on plot for visual!
+    drawPlot(question);
+  }
+  // Write coordinates mode:
+  else if (mode === 'write') {
+    let userInput = document.getElementById('coords-input').value.trim();
+    // Accept formats: (x, y), x,y, x y, just numbers with comma
+    let matches = userInput.match(/-?\d+(\s*,\s*-?\d+|\s+-?\d+|\s*-?\d+)/);
+    let xAnswer = null, yAnswer = null;
+    if (matches) {
+      let nums = matches[0].replace(/[()]/g,'').replace(' ',',').split(',');
+      nums = nums.map(v=>parseInt(v));
+      if (nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1])) {
+        xAnswer = nums[0]; yAnswer = nums[1];
+      }
+    }
+    if (xAnswer === question.x && yAnswer === question.y) {
+      document.getElementById('feedback').innerHTML = `<span class="correct">🎉 Correct! The coordinates are (${question.x}, ${question.y}).</span>`;
+    } else {
+      document.getElementById('feedback').innerHTML = `<span class="incorrect">❌ Incorrect. Make sure to write the correct x and y values for the highlighted point!<br>The correct answer is <b>(${question.x}, ${question.y})</b>.</span>`;
+    }
+    // Show correct point highlighted for visual!
+    drawPlot(question, false);
+  }
+}
+
+// Setup radio buttons
+document.getElementById('plot-given').onchange = newQuestion;
+document.getElementById('write-coords').onchange = newQuestion;
+
+// Next button event = check if not answered yet, otherwise new Q
+document.getElementById('next-btn').onclick = function() {
+  if(mode === 'plot' && !userMarker) {
+    document.getElementById('feedback').textContent = 'Click on the plane to select your answer.';
+    return;
+  }
+  if(mode === 'write' && !document.getElementById('coords-input')) {
+    return;
+  }
+  checkAnswer();
+  setTimeout(newQuestion, 1700); // show answer briefly
+};
+
+newQuestion();
+</script>
+</body>
+</html>
