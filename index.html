@@ -55,14 +55,10 @@
 </div>
 
 <script>
-// GAME STATE
-let mode = "plot";
+let mode = "plot"; // 'plot' = plot ordered pair, 'write' = write coords
 let question = {};
 let userMarker = null;
-const axesConfig = {
-  x: {min: -10, max: 10},
-  y: {min: -10, max: 10}
-};
+const axesConfig = { x: {min: -10, max: 10}, y: {min: -10, max: 10} };
 
 function getRandomInt(min,max,excludeZero=true){
   let r;
@@ -72,7 +68,6 @@ function getRandomInt(min,max,excludeZero=true){
 }
 
 function newQuestion() {
-  // Clear feedback & plot
   document.getElementById('feedback').textContent = '';
   userMarker = null;
   mode = document.querySelector('input[name="activity"]:checked').value;
@@ -83,51 +78,43 @@ function newQuestion() {
     document.getElementById('game-question').innerHTML = `Plot the point <b>(${x}, ${y})</b> on the Cartesian plane by clicking the correct location.`;
     document.getElementById('input-area').innerHTML = '';
     drawPlot();
-    // Set up event!
-    Plotly.Plots.resize(document.getElementById('plot-area'));
-    document.getElementById('plot-area').on('plotly_click', function(data){
-      if(mode !== 'plot') return;
-      // Find closest snapped integer from click (Plotly gives data.points[0]):
-      let xVal = Math.round(data.points[0].x);
-      let yVal = Math.round(data.points[0].y);
-      userMarker = {x:xVal, y:yVal};
-      drawPlot(userMarker);
-      document.getElementById('input-area').innerHTML = `<p>Your selected point: <b>(${xVal}, ${yVal})</b></p>`;
-      // For feedback, check immediately
-      checkPlotImmediate();
-    });
+    setPlotClickHandler();
   } else if (mode === 'write') {
     question = {x, y};
-    drawPlot({x,y}, false); // Show POINT, not user marker
+    drawPlot({x,y}, false); // Show question marker
     document.getElementById('game-question').innerHTML = `What are the coordinates of the highlighted point <span style="color:#b7950b;">•</span>? Write as an ordered pair:`;
     document.getElementById('input-area').innerHTML =
       `<input type="text" id="coords-input" placeholder="e.g. (2, 5)" style="width:120px; font-size:1.1em;" />`;
-    // Remove plotly_click listener if flipping mode
-    document.getElementById('plot-area').on('plotly_click', null);
+    removePlotClickHandler();
   }
 }
 
+// Draw axes + points
 function drawPlot(marker, asStudent=true) {
-  const xTicks = [];
-  for(let i=axesConfig.x.min;i<=axesConfig.x.max;i++) xTicks.push(i);
-  const yTicks = [];
-  for(let i=axesConfig.y.min;i<=axesConfig.y.max;i++) yTicks.push(i);
-
   let data = [];
-  // Show question marker:
-  if (mode === 'write' && marker) {
+  // Transparent scatter to enable clicks anywhere
+  if (mode === 'plot') {
     data.push({
-      x: [marker.x], y: [marker.y], type:'scatter', mode:'markers',
-      name:'Given Point', marker:{ size:22, color:'#b7950b', symbol:'circle' }
+      x: [], y: [],
+      xaxis: 'x', yaxis: 'y',
+      mode: 'markers',
+      marker: {color:'rgba(0,0,0,0)'},
+      hoverinfo: 'none',
+      showlegend: false
+    });
+    if (userMarker) {
+      data.push({
+        x:[userMarker.x], y:[userMarker.y], type:'scatter', mode:'markers',
+        name: 'Your Point', marker: {size:22, color:'#2980b9', symbol:'x'}
+      });
+    }
+  } else if (mode === 'write' && marker) {
+    data.push({
+      x:[marker.x], y:[marker.y], type:'scatter', mode:'markers',
+      name:'Given Point', marker:{ size:22, color:'#b7950b', symbol:'circle'}
     });
   }
-  // Show student marker:
-  if (mode === 'plot' && marker) {
-    data.push({
-      x: [marker.x], y: [marker.y], type:'scatter', mode:'markers',
-      name:'Your Point', marker:{ size:22, color:'#2980b9', symbol:'x' }
-    });
-  }
+
   const layout = {
     xaxis: {
       range: [axesConfig.x.min, axesConfig.x.max],
@@ -144,7 +131,59 @@ function drawPlot(marker, asStudent=true) {
     plot_bgcolor:'#f6fafd',
     hovermode:false
   };
+
   Plotly.newPlot('plot-area', data, layout, {displayModeBar:false, responsive:true});
+}
+
+// Attach click handler for 'plot' mode
+function setPlotClickHandler() {
+  removePlotClickHandler(); // Remove previous
+  const plotDiv = document.getElementById('plot-area');
+  plotDiv.on('plotly_click', function(data){
+    if(mode !== 'plot') return;
+    // Find closest integer
+    let xVal = Math.round(data.points[0].x);
+    let yVal = Math.round(data.points[0].y);
+    userMarker = {x: xVal, y: yVal};
+    drawPlot(userMarker);
+    document.getElementById('input-area').innerHTML = `<p>Your selected point: <b>(${xVal}, ${yVal})</b></p>`;
+    checkPlotImmediate();
+  });
+  // For clicks on empty space (not on a marker), use mouse events and axis conversion!
+  plotDiv.on('plotly_click', null); // Remove accidental double handlers
+  plotDiv.addEventListener('mousedown', clickAnywhereOnPlot);
+}
+
+// Remove click handler
+function removePlotClickHandler() {
+  const plotDiv = document.getElementById('plot-area');
+  plotDiv.on('plotly_click', null);
+  plotDiv.removeEventListener('mousedown', clickAnywhereOnPlot);
+}
+
+// Convert mouse click to axis coords
+function clickAnywhereOnPlot(evt) {
+  if(mode !== 'plot') return;
+  // Use bounding rect and Plotly's axis conversion
+  const plotDiv = document.getElementById('plot-area');
+  const rect = plotDiv.getBoundingClientRect();
+  // If over the axes
+  const xPixel = evt.clientX - rect.left;
+  const yPixel = evt.clientY - rect.top;
+  // Use plotly internal: y is inverted
+  let gd = plotDiv._fullLayout;
+  if (!gd) return;
+  const xaxis = gd.xaxis;
+  const yaxis = gd.yaxis;
+  // Convert pixel position to axis using p2c [pixel to coord] inverse
+  let xVal = Math.round(xaxis.p2c.inverse(xPixel));
+  let yVal = Math.round(yaxis.p2c.inverse(yPixel));
+  // Only accept within axis range
+  if (xVal < axesConfig.x.min || xVal > axesConfig.x.max || yVal < axesConfig.y.min || yVal > axesConfig.y.max) return;
+  userMarker = {x: xVal, y: yVal};
+  drawPlot(userMarker);
+  document.getElementById('input-area').innerHTML = `<p>Your selected point: <b>(${xVal}, ${yVal})</b></p>`;
+  checkPlotImmediate();
 }
 
 // Immediate feedback for plotting mode
@@ -160,24 +199,21 @@ function checkPlotImmediate() {
   }
 }
 
+// Check coordinates mode
 function checkAnswer() {
   document.getElementById('feedback').textContent = '';
   if (mode === 'write') {
     let userInput = document.getElementById('coords-input').value.trim();
-    // Accept formats: (x, y), x,y, x y, just numbers with comma
-    let matches = userInput.match(/-?\d+(\s*,\s*-?\d+|\s+-?\d+|\s*-?\d+)/);
+    let matches = userInput.match(/-?\d+/g);
     let xAnswer = null, yAnswer = null;
-    if (matches) {
-      let nums = matches[0].replace(/[()]/g,'').replace(' ',',').split(',');
-      nums = nums.map(v=>parseInt(v));
-      if (nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1])) {
-        xAnswer = nums[0]; yAnswer = nums[1];
-      }
+    if (matches && matches.length >= 2) {
+      xAnswer = parseInt(matches[0]);
+      yAnswer = parseInt(matches[1]);
     }
     if (xAnswer === question.x && yAnswer === question.y) {
       document.getElementById('feedback').innerHTML = `<span class="correct">🎉 Correct! The coordinates are (${question.x}, ${question.y}).</span>`;
     } else {
-      document.getElementById('feedback').innerHTML = `<span class="incorrect">❌ Incorrect. Make sure to write the correct x and y values for the highlighted point!<br>The correct answer is <b>(${question.x}, ${question.y})</b>.</span>`;
+      document.getElementById('feedback').innerHTML = `<span class="incorrect">❌ Incorrect. The correct answer is <b>(${question.x}, ${question.y})</b>.</span>`;
     }
     drawPlot(question, false);
   }
