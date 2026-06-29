@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <title>Cartesian Plane Plotting Game (Linear Relationships)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Plotly.js CDN -->
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; background: #eef6fa; max-width: 850px; margin: 24px auto; }
@@ -75,46 +74,102 @@ function newQuestion() {
   let y = getRandomInt(axesConfig.y.min+2, axesConfig.y.max-2);
   if (mode === 'plot') {
     question = {x, y};
-    document.getElementById('game-question').innerHTML = `Plot the point <b>(${x}, ${y})</b> on the Cartesian plane by clicking the correct location.`;
-    document.getElementById('input-area').innerHTML = '';
-    drawPlot();
-    setPlotClickHandler();
+    document.getElementById('game-question').innerHTML = `Drag the blue circle to <b>(${x}, ${y})</b> on the Cartesian plane.`;
+    document.getElementById('input-area').innerHTML = '<p>Drag the marker, then check your answer!</p>';
+    userMarker = {x:0, y:0};
+    drawPlotDraggable(userMarker);
   } else if (mode === 'write') {
     question = {x, y};
-    drawPlot({x,y}, false); // Show question marker
+    drawPlot({x,y}, false);
     document.getElementById('game-question').innerHTML = `What are the coordinates of the highlighted point <span style="color:#b7950b;">•</span>? Write as an ordered pair:`;
     document.getElementById('input-area').innerHTML =
       `<input type="text" id="coords-input" placeholder="e.g. (2, 5)" style="width:120px; font-size:1.1em;" />`;
-    removePlotClickHandler();
+    removeDragHandler();
   }
 }
 
-// Draw axes + points
+// Draw axes and draggable marker for plot mode
+function drawPlotDraggable(marker) {
+  let data = [
+    {
+      x: [marker.x], y: [marker.y],
+      mode: 'markers',
+      marker: { size: 24, color: '#2980b9', symbol: 'circle' },
+      name: 'Draggable',
+      text: ['Drag me!'],
+      hoverinfo: 'text'
+    }
+  ];
+
+  const layout = {
+    xaxis: {
+      range: [axesConfig.x.min, axesConfig.x.max],
+      dtick: 1, zeroline:true, zerolinewidth:2,
+      gridcolor:'rgba(128,128,128,0.15)', gridwidth:1, showline:true, linewidth:2
+    },
+    yaxis: {
+      range: [axesConfig.y.min, axesConfig.y.max],
+      dtick: 1, zeroline:true, zerolinewidth:2,
+      gridcolor:'rgba(128,128,128,0.15)', gridwidth:1, showline:true, linewidth:2
+    },
+    dragmode: 'select',
+    showlegend:false,
+    margin:{t:40, r:40, b:40, l:40},
+    plot_bgcolor:'#f6fafd',
+    hovermode:false
+  };
+  Plotly.newPlot('plot-area', data, layout, {displayModeBar:false, responsive:true});
+  setDragHandler();
+}
+
+// Drag marker handler (snap to grid, update)
+function setDragHandler() {
+  removeDragHandler();
+  const plotDiv = document.getElementById('plot-area');
+  plotDiv.on('plotly_relayout', function(event){
+    // Get axis ranges (if marker was moved)
+    if (event['xaxis.range[0]'] !== undefined) return; // ignore pan/zoom events
+    // Find new position from relayout
+    let newX = userMarker.x;
+    let newY = userMarker.y;
+    // If marker was moved, update
+    if(event['x[0]']!==undefined && event['y[0]']!==undefined) {
+      newX = event['x[0]'];
+      newY = event['y[0]'];
+    } else {
+      // If marker was moved, find in full trace
+      if (plotDiv.data && plotDiv.data[0]) {
+        newX = plotDiv.data[0].x[0];
+        newY = plotDiv.data[0].y[0];
+      }
+    }
+    // Snap to nearest integer
+    newX = Math.round(newX);
+    newY = Math.round(newY);
+    userMarker = {x: newX, y: newY};
+    // Update plot with snapped marker
+    Plotly.update('plot-area', {x:[[newX]], y:[[newY]], marker:{color:'#2980b9'}}, {}, [0]);
+    // Check answer automatically after drag
+    checkPlotImmediate();
+    document.getElementById('input-area').innerHTML = `<p>Your marker position: <b>(${newX}, ${newY})</b></p>`;
+  });
+}
+
+// Remove drag handler
+function removeDragHandler() {
+  const plotDiv = document.getElementById('plot-area');
+  plotDiv.on('plotly_relayout', null);
+}
+
+// Draw for write mode (highlighted point)
 function drawPlot(marker, asStudent=true) {
   let data = [];
-  // Transparent scatter to enable clicks anywhere
-  if (mode === 'plot') {
-    data.push({
-      x: [], y: [],
-      xaxis: 'x', yaxis: 'y',
-      mode: 'markers',
-      marker: {color:'rgba(0,0,0,0)'},
-      hoverinfo: 'none',
-      showlegend: false
-    });
-    if (userMarker) {
-      data.push({
-        x:[userMarker.x], y:[userMarker.y], type:'scatter', mode:'markers',
-        name: 'Your Point', marker: {size:22, color:'#2980b9', symbol:'x'}
-      });
-    }
-  } else if (mode === 'write' && marker) {
+  if (mode === 'write' && marker) {
     data.push({
       x:[marker.x], y:[marker.y], type:'scatter', mode:'markers',
       name:'Given Point', marker:{ size:22, color:'#b7950b', symbol:'circle'}
     });
   }
-
   const layout = {
     xaxis: {
       range: [axesConfig.x.min, axesConfig.x.max],
@@ -131,75 +186,23 @@ function drawPlot(marker, asStudent=true) {
     plot_bgcolor:'#f6fafd',
     hovermode:false
   };
-
   Plotly.newPlot('plot-area', data, layout, {displayModeBar:false, responsive:true});
 }
 
-// Attach click handler for 'plot' mode
-function setPlotClickHandler() {
-  removePlotClickHandler(); // Remove previous
-  const plotDiv = document.getElementById('plot-area');
-  plotDiv.on('plotly_click', function(data){
-    if(mode !== 'plot') return;
-    // Find closest integer
-    let xVal = Math.round(data.points[0].x);
-    let yVal = Math.round(data.points[0].y);
-    userMarker = {x: xVal, y: yVal};
-    drawPlot(userMarker);
-    document.getElementById('input-area').innerHTML = `<p>Your selected point: <b>(${xVal}, ${yVal})</b></p>`;
-    checkPlotImmediate();
-  });
-  // For clicks on empty space (not on a marker), use mouse events and axis conversion!
-  plotDiv.on('plotly_click', null); // Remove accidental double handlers
-  plotDiv.addEventListener('mousedown', clickAnywhereOnPlot);
-}
-
-// Remove click handler
-function removePlotClickHandler() {
-  const plotDiv = document.getElementById('plot-area');
-  plotDiv.on('plotly_click', null);
-  plotDiv.removeEventListener('mousedown', clickAnywhereOnPlot);
-}
-
-// Convert mouse click to axis coords
-function clickAnywhereOnPlot(evt) {
-  if(mode !== 'plot') return;
-  // Use bounding rect and Plotly's axis conversion
-  const plotDiv = document.getElementById('plot-area');
-  const rect = plotDiv.getBoundingClientRect();
-  // If over the axes
-  const xPixel = evt.clientX - rect.left;
-  const yPixel = evt.clientY - rect.top;
-  // Use plotly internal: y is inverted
-  let gd = plotDiv._fullLayout;
-  if (!gd) return;
-  const xaxis = gd.xaxis;
-  const yaxis = gd.yaxis;
-  // Convert pixel position to axis using p2c [pixel to coord] inverse
-  let xVal = Math.round(xaxis.p2c.inverse(xPixel));
-  let yVal = Math.round(yaxis.p2c.inverse(yPixel));
-  // Only accept within axis range
-  if (xVal < axesConfig.x.min || xVal > axesConfig.x.max || yVal < axesConfig.y.min || yVal > axesConfig.y.max) return;
-  userMarker = {x: xVal, y: yVal};
-  drawPlot(userMarker);
-  document.getElementById('input-area').innerHTML = `<p>Your selected point: <b>(${xVal}, ${yVal})</b></p>`;
-  checkPlotImmediate();
-}
-
-// Immediate feedback for plotting mode
 function checkPlotImmediate() {
   if (!userMarker) {
-    document.getElementById('feedback').innerHTML = '<span class="incorrect">Click on the plane to choose your answer.</span>';
+    document.getElementById('feedback').innerHTML = '<span class="incorrect">Drag the marker to choose your answer.</span>';
     return;
   }
   if (userMarker.x === question.x && userMarker.y === question.y) {
     document.getElementById('feedback').innerHTML = `<span class="correct">🎉 Correct! (${question.x}, ${question.y}) is plotted.</span>`;
+    Plotly.update('plot-area', {marker:{color:'#27ae60'}}, {}, [0]); // green if correct
   } else {
-    document.getElementById('feedback').innerHTML = `<span class="incorrect">❌ Incorrect. You selected (${userMarker.x}, ${userMarker.y}), but the correct point is (${question.x}, ${question.y}). Try again or click 'Next'.</span>`;
+    document.getElementById('feedback').innerHTML = `<span class="incorrect">❌ Try again. You selected (${userMarker.x}, ${userMarker.y}), but need (${question.x}, ${question.y}).</span>`;
+    Plotly.update('plot-area', {marker:{color:'#e74c3c'}}, {}, [0]); // red if wrong
   }
 }
 
-// Check coordinates mode
 function checkAnswer() {
   document.getElementById('feedback').textContent = '';
   if (mode === 'write') {
@@ -224,7 +227,7 @@ document.getElementById('write-coords').onchange = newQuestion;
 
 document.getElementById('next-btn').onclick = function() {
   if(mode === 'plot' && !userMarker) {
-    document.getElementById('feedback').textContent = 'Click on the plane to select your answer.';
+    document.getElementById('feedback').textContent = 'Drag the marker to select your answer.';
     return;
   }
   if(mode === 'write' && !document.getElementById('coords-input')) {
